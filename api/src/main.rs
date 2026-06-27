@@ -114,9 +114,15 @@ fn handle(mut stream: TcpStream, store: &SharedStore) -> std::io::Result<()> {
         ),
 
         ("GET", "/api/list") => {
+            // Optional ?prefix= filters keys server-side; ?limit= caps how many
+            // rows we return. Both matter once a database holds a lot of keys —
+            // returning everything would be huge and would freeze the browser.
+            let params = parse_form(query.as_bytes());
+            let prefix = get_param(&params, "prefix").unwrap_or("");
+            let limit = get_param(&params, "limit").and_then(|s| s.parse::<usize>().ok());
             let json = {
                 let store = store.read().unwrap_or_else(|p| p.into_inner());
-                list_json(&store)?
+                list_json(&store, prefix, limit)?
             };
             respond(&mut stream, 200, "application/json", json.as_bytes())
         }
@@ -330,14 +336,26 @@ fn respond(
     stream.flush()
 }
 
-/// Build a JSON array of all key/value pairs in the store.
-fn list_json(store: &Store) -> std::io::Result<String> {
+/// Build a JSON array of key/value pairs, optionally filtered by key `prefix`
+/// and capped at `limit` rows. An empty prefix means "all keys"; `None` limit
+/// means "no cap".
+fn list_json(store: &Store, prefix: &str, limit: Option<usize>) -> std::io::Result<String> {
     let mut items = store.scan()?;
     items.sort();
 
+    let prefix_bytes = prefix.as_bytes();
     let mut s = String::from("[");
-    for (i, (k, v)) in items.iter().enumerate() {
-        if i > 0 {
+    let mut n = 0usize;
+    for (k, v) in items.iter() {
+        if !prefix_bytes.is_empty() && !k.starts_with(prefix_bytes) {
+            continue;
+        }
+        if let Some(max) = limit {
+            if n >= max {
+                break;
+            }
+        }
+        if n > 0 {
             s.push(',');
         }
         s.push_str("{\"key\":\"");
@@ -345,6 +363,7 @@ fn list_json(store: &Store) -> std::io::Result<String> {
         s.push_str("\",\"value\":\"");
         s.push_str(&json_escape(&String::from_utf8_lossy(v)));
         s.push_str("\"}");
+        n += 1;
     }
     s.push(']');
     Ok(s)

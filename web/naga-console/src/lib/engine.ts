@@ -89,15 +89,23 @@ export async function deleteEntry(
   if (!res.ok) throw new Error(`engine delete failed (HTTP ${res.status})`);
 }
 
-/** List every key/value pair in a project's database (prefix stripped). */
-export async function listEntries(projectId: string): Promise<Entry[]> {
-  const res = await engineFetch("/api/list");
+/** List key/value pairs in a project's database (prefix stripped).
+ *
+ * `limit` caps how many rows we ask the engine for. A database can hold
+ * millions of keys; returning them all would be huge and would freeze the
+ * browser, so the UI asks for a page-sized slice. The engine does the prefix
+ * filtering, so only this project's keys come back.
+ */
+export async function listEntries(
+  projectId: string,
+  limit = 200
+): Promise<Entry[]> {
+  const p = prefix(projectId);
+  const query = new URLSearchParams({ prefix: p, limit: String(limit) }).toString();
+  const res = await engineFetch(`/api/list?${query}`);
   if (!res.ok) throw new Error(`engine list failed (HTTP ${res.status})`);
   const all = (await res.json()) as Entry[];
-  const p = prefix(projectId);
-  return all
-    .filter((e) => e.key.startsWith(p))
-    .map((e) => ({ key: e.key.slice(p.length), value: e.value }));
+  return all.map((e) => ({ key: e.key.slice(p.length), value: e.value }));
 }
 
 /** How many keys a project's database holds. */

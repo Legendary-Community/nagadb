@@ -151,6 +151,13 @@ export default function DataBrowser({ projectId }: { projectId: string }) {
         </p>
       )}
 
+      {!loading && entries.length >= 200 && (
+        <p className="mb-3 rounded-lg border border-border bg-surface-2/50 px-3 py-2 text-[12px] text-muted">
+          Showing the first {entries.length} keys. This database may hold many
+          more — use search to find a specific key.
+        </p>
+      )}
+
       {/* Table */}
       <div className="overflow-hidden rounded-xl border border-border">
         <table className="w-full text-left">
