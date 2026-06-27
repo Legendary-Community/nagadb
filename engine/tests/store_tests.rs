@@ -204,6 +204,7 @@ fn auto_flush_triggers_at_threshold() {
     db.put(b"c", b"3").unwrap();
     assert_eq!(db.sstable_count(), 0); // not yet
     db.put(b"d", b"4").unwrap(); // 4th entry -> auto flush
+    db.wait_for_background_tasks().unwrap();
     assert_eq!(db.sstable_count(), 1);
 
     // All data still readable after the automatic flush.

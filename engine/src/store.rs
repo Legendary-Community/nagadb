@@ -16,6 +16,8 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::memtable::Memtable;
 use crate::sstable::SsTable;
@@ -25,10 +27,17 @@ use crate::wal::{Wal, WalRecord};
 /// (Counts tombstones too. Small enough to be easy to demonstrate.)
 const DEFAULT_FLUSH_THRESHOLD: usize = 1024;
 
+/// Messages sent from background threads to the main Store.
+pub enum BackgroundMsg {
+    FlushComplete { sstable: SsTable },
+    FlushFailed(io::Error),
+}
+
 /// A single-node, crash-safe key/value store.
 pub struct Store {
-    wal: Wal,
+    wal: Option<Wal>,
     memtable: Memtable,
+    imm_memtable: Option<Arc<Memtable>>,
     /// On-disk sorted tables, kept oldest-first. The newest data is at the end.
     sstables: Vec<SsTable>,
     dir: PathBuf,
@@ -36,7 +45,10 @@ pub struct Store {
     next_seq: u64,
     /// Flush the memtable to a new SSTable once it reaches this many entries.
     flush_threshold: usize,
+    bg_tx: Sender<BackgroundMsg>,
+    bg_rx: std::sync::Mutex<Receiver<BackgroundMsg>>,
 }
+
 
 impl Store {
     /// Open a store living in directory `dir`. Creates the directory if needed,
@@ -51,36 +63,91 @@ impl Store {
         let dir = dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&dir)?;
 
-        // 1. Find SSTables already on disk and load them oldest-first.
-        let (sstables, next_seq) = load_sstables(&dir)?;
+        // 0. Backwards compatibility: rename log.wal to active.wal if it exists
+        let log_wal_path = dir.join("log.wal");
+        let active_wal_path = dir.join("active.wal");
+        let flushing_wal_path = dir.join("flushing.wal");
+        if log_wal_path.exists() && !active_wal_path.exists() {
+            std::fs::rename(&log_wal_path, &active_wal_path)?;
+        }
 
-        // 2. Rebuild the memtable from whatever the WAL still holds (the data
-        //    that was written but not yet flushed into an SSTable).
-        let wal_path = dir.join("log.wal");
+        // 1. Find SSTables already on disk and load them oldest-first.
+        let (mut sstables, mut next_seq) = load_sstables(&dir)?;
+
+        // 1.5 Recover flushing.wal if it exists (crashed during active flush)
+        if flushing_wal_path.exists() {
+            let mut recover_mem = Memtable::new();
+            for record in Wal::replay(&flushing_wal_path)? {
+                match record {
+                    WalRecord::Put { key, value } => recover_mem.put(key, value),
+                    WalRecord::Delete { key } => recover_mem.delete(key),
+                }
+            }
+            if !recover_mem.is_empty() {
+                let path = dir.join(sstable_filename(next_seq));
+                let sstable = SsTable::write(&path, recover_mem.iter_all())?;
+                sstables.push(sstable);
+                next_seq += 1;
+            }
+            let _ = std::fs::remove_file(&flushing_wal_path);
+        }
+
+        // 2. Rebuild the memtable from active.wal.
         let mut memtable = Memtable::new();
-        for record in Wal::replay(&wal_path)? {
-            match record {
-                WalRecord::Put { key, value } => memtable.put(key, value),
-                WalRecord::Delete { key } => memtable.delete(key),
+        if active_wal_path.exists() {
+            for record in Wal::replay(&active_wal_path)? {
+                match record {
+                    WalRecord::Put { key, value } => memtable.put(key, value),
+                    WalRecord::Delete { key } => memtable.delete(key),
+                }
             }
         }
 
         // 3. Open the WAL for new appends.
-        let wal = Wal::open(&wal_path)?;
+        let wal = Wal::open(&active_wal_path)?;
+        let (bg_tx, bg_rx) = channel();
 
         Ok(Store {
-            wal,
+            wal: Some(wal),
             memtable,
+            imm_memtable: None,
             sstables,
             dir,
             next_seq,
             flush_threshold,
+            bg_tx,
+            bg_rx: std::sync::Mutex::new(bg_rx),
         })
+    }
+
+    /// Helper to get a mutable reference to the active WAL.
+    fn wal_mut(&mut self) -> &mut Wal {
+        self.wal.as_mut().expect("WAL is closed")
+    }
+
+    /// Non-blockingly polls background worker channel to check for completed flushes.
+    fn process_background_tasks(&mut self) -> io::Result<()> {
+        let rx = self.bg_rx.lock().unwrap();
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                BackgroundMsg::FlushComplete { sstable } => {
+                    self.sstables.push(sstable);
+                    self.imm_memtable = None;
+                    let flushing_wal_path = self.dir.join("flushing.wal");
+                    let _ = std::fs::remove_file(&flushing_wal_path);
+                }
+                BackgroundMsg::FlushFailed(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Set `key = value`. Safe across crashes: written to the WAL first.
     pub fn put(&mut self, key: &[u8], value: &[u8]) -> io::Result<()> {
-        self.wal.append(&WalRecord::Put {
+        self.process_background_tasks()?;
+        self.wal_mut().append(&WalRecord::Put {
             key: key.to_vec(),
             value: value.to_vec(),
         })?;
@@ -90,22 +157,16 @@ impl Store {
 
     /// Delete `key`. Safe across crashes: written to the WAL first.
     pub fn delete(&mut self, key: &[u8]) -> io::Result<()> {
-        self.wal.append(&WalRecord::Delete { key: key.to_vec() })?;
+        self.process_background_tasks()?;
+        self.wal_mut().append(&WalRecord::Delete { key: key.to_vec() })?;
         self.memtable.delete(key.to_vec());
         self.maybe_flush()
     }
 
     /// Set MANY key/value pairs at once with a **single** disk flush ("group
     /// commit"). This is the high-throughput write path.
-    ///
-    /// Calling [`Store::put`] in a loop fsyncs once per key, so the SSD's
-    /// few-millisecond sync latency caps you at a few hundred writes/sec. Here
-    /// we record every change in the WAL with one shared fsync, then apply them
-    /// all to the memtable. We pay the disk's latency a single time for the
-    /// whole batch, so throughput climbs by orders of magnitude — with exactly
-    /// the same crash safety as `put` (the batch is durable as a unit before we
-    /// touch memory).
     pub fn put_batch(&mut self, pairs: &[(Vec<u8>, Vec<u8>)]) -> io::Result<()> {
+        self.process_background_tasks()?;
         if pairs.is_empty() {
             return Ok(());
         }
@@ -118,7 +179,7 @@ impl Store {
                 value: v.clone(),
             })
             .collect();
-        self.wal.append_batch(&records)?;
+        self.wal_mut().append_batch(&records)?;
 
         // 2. Apply to the in-memory memtable now that it's safe on disk.
         for (key, value) in pairs {
@@ -130,24 +191,31 @@ impl Store {
     }
 
     /// Look up `key`. Returns the value, or `None` if missing or deleted.
-    ///
-    /// We search newest data first: the memtable, then each SSTable from newest
-    /// to oldest. The first place that mentions the key wins — and if that place
-    /// is a tombstone, the answer is "deleted" and we stop looking.
     pub fn get(&self, key: &[u8]) -> io::Result<Option<Vec<u8>>> {
-        // 1. Newest: the in-memory memtable.
-        match self.memtable.lookup(key) {
-            Some(Some(value)) => return Ok(Some(value.to_vec())),
-            Some(None) => return Ok(None), // tombstone: deleted
-            None => {}
+        // 1. Newest: the in-memory active memtable.
+        if let Some(res) = self.memtable.lookup(key) {
+            match res {
+                Some(value) => return Ok(Some(value.to_vec())),
+                None => return Ok(None),
+            }
         }
 
-        // 2. On-disk SSTables, newest (end of the list) to oldest.
+        // 2. The flushing memtable.
+        if let Some(ref imm) = self.imm_memtable {
+            if let Some(res) = imm.lookup(key) {
+                match res {
+                    Some(value) => return Ok(Some(value.to_vec())),
+                    None => return Ok(None),
+                }
+            }
+        }
+
+        // 3. On-disk SSTables, newest to oldest.
         for sstable in self.sstables.iter().rev() {
             match sstable.get(key)? {
                 Some(Some(value)) => return Ok(Some(value)),
-                Some(None) => return Ok(None), // tombstone: deleted
-                None => {}                     // not in this file; keep looking
+                Some(None) => return Ok(None),
+                None => {}
             }
         }
 
@@ -155,13 +223,7 @@ impl Store {
     }
 
     /// Return every live (non-deleted) key/value pair, in sorted order.
-    ///
-    /// This merges all SSTables (oldest first) and finally the memtable, so that
-    /// newer values and tombstones correctly override older ones. Used by the
-    /// dashboard to list everything in the database.
     pub fn scan(&self) -> io::Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        // Build a merged view. Inserting oldest -> newest means newer entries
-        // overwrite older ones, which is exactly the LSM rule.
         let mut merged: BTreeMap<Vec<u8>, Option<Vec<u8>>> = BTreeMap::new();
 
         for sstable in &self.sstables {
@@ -169,11 +231,15 @@ impl Store {
                 merged.insert(key, value);
             }
         }
+        if let Some(ref imm) = self.imm_memtable {
+            for (key, value) in imm.iter_all() {
+                merged.insert(key.to_vec(), value.map(|v| v.to_vec()));
+            }
+        }
         for (key, value) in self.memtable.iter_all() {
             merged.insert(key.to_vec(), value.map(|v| v.to_vec()));
         }
 
-        // Keep only live entries (drop tombstones).
         let live = merged
             .into_iter()
             .filter_map(|(k, v)| v.map(|value| (k, value)))
@@ -193,46 +259,86 @@ impl Store {
     /// Flush the memtable to a new SSTable if it has grown past the threshold.
     fn maybe_flush(&mut self) -> io::Result<()> {
         if self.memtable.len() >= self.flush_threshold {
-            self.flush()?;
+            // Apply backpressure: wait for any running background flush to complete.
+            while self.imm_memtable.is_some() {
+                self.process_background_tasks()?;
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            self.trigger_background_flush()?;
         }
         Ok(())
     }
 
-    /// Force the current memtable out to a new on-disk SSTable, then clear it
-    /// and empty the WAL. Safe ordering: the SSTable is fully written and
-    /// fsynced BEFORE we touch the WAL, so a crash at any moment loses nothing.
+    /// Starts an asynchronous background flush task.
+    fn trigger_background_flush(&mut self) -> io::Result<()> {
+        let active_wal_path = self.dir.join("active.wal");
+        let flushing_wal_path = self.dir.join("flushing.wal");
+
+        let imm = Arc::new(std::mem::replace(&mut self.memtable, Memtable::new()));
+        self.imm_memtable = Some(Arc::clone(&imm));
+
+        // Rotate WAL
+        self.wal = None; // Drop/close active.wal file handle
+        std::fs::rename(&active_wal_path, &flushing_wal_path)?;
+        self.wal = Some(Wal::open(&active_wal_path)?);
+
+        let tx = self.bg_tx.clone();
+        let path = self.dir.join(sstable_filename(self.next_seq));
+        self.next_seq += 1;
+
+        std::thread::spawn(move || {
+            match SsTable::write(&path, imm.iter_all()) {
+                Ok(sstable) => {
+                    let _ = tx.send(BackgroundMsg::FlushComplete { sstable });
+                }
+                Err(e) => {
+                    let _ = tx.send(BackgroundMsg::FlushFailed(e));
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Force the current memtable out to a new on-disk SSTable synchronously.
     pub fn flush(&mut self) -> io::Result<()> {
+        // Wait for any background flush to complete first
+        while self.imm_memtable.is_some() {
+            self.process_background_tasks()?;
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
         if self.memtable.is_empty() {
             return Ok(());
         }
+
+        let active_wal_path = self.dir.join("active.wal");
+        let flushing_wal_path = self.dir.join("flushing.wal");
+
+        // Rotate WAL
+        self.wal = None; // Drop/close active.wal
+        std::fs::rename(&active_wal_path, &flushing_wal_path)?;
+        self.wal = Some(Wal::open(&active_wal_path)?);
 
         let path = self.dir.join(sstable_filename(self.next_seq));
         let sstable = SsTable::write(&path, self.memtable.iter_all())?;
         self.sstables.push(sstable);
         self.next_seq += 1;
 
-        // The data now lives durably in the SSTable, so memory and the WAL can
-        // be reset.
         self.memtable.clear();
-        self.wal.truncate()?;
+        let _ = std::fs::remove_file(&flushing_wal_path);
         Ok(())
     }
 
-    /// Merge every SSTable into a single fresh one (Step 3: compaction).
-    ///
-    /// As files pile up from repeated flushes, reads get slower (they may have
-    /// to check every file) and dead data lingers (old overwritten values and
-    /// tombstones). Compaction fixes both:
-    ///
-    ///   - it keeps only the **newest** value for each key, and
-    ///   - it **drops tombstones**, which is safe here because after merging
-    ///     *all* SSTables there is no older file left for a tombstone to hide.
-    ///
-    /// Safe ordering: the new merged file is written and fsynced BEFORE the old
-    /// files are deleted. If we crash in between, startup simply loads both the
-    /// old and new files; the merged file has a higher sequence number so it
-    /// still wins, and the duplicated data resolves correctly.
+    /// Merge every SSTable into a single fresh one synchronously.
     pub fn compact(&mut self) -> io::Result<()> {
+        // Wait for any background flush to complete first
+        while self.imm_memtable.is_some() {
+            self.process_background_tasks()?;
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        self.process_background_tasks()?;
         if self.sstables.is_empty() {
             return Ok(());
         }
@@ -256,7 +362,7 @@ impl Store {
             self.sstables.iter().map(|s| s.path().to_path_buf()).collect();
 
         // Write the single compacted SSTable (skip it entirely if nothing is left
-        // alive — e.g. everything was deleted).
+        // alive).
         let mut new_sstables = Vec::new();
         if !live.is_empty() {
             let path = self.dir.join(sstable_filename(self.next_seq));
@@ -279,6 +385,25 @@ impl Store {
     /// How many SSTable files currently exist on disk.
     pub fn sstable_count(&self) -> usize {
         self.sstables.len()
+    }
+
+    /// Wait for any running background tasks (like flushes) to complete.
+    pub fn wait_for_background_tasks(&mut self) -> io::Result<()> {
+        while self.imm_memtable.is_some() {
+            self.process_background_tasks()?;
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Store {
+    fn drop(&mut self) {
+        // Safe database closing: wait for any active background flush to finish
+        while self.imm_memtable.is_some() {
+            let _ = self.process_background_tasks();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
 }
 
