@@ -120,3 +120,25 @@ export async function countEntries(projectId: string): Promise<number> {
   const data = (await res.json()) as { count: number };
   return data.count ?? 0;
 }
+
+/** Get overall engine statistics (total keys and SSTables count). */
+export async function getEngineStats(): Promise<{ entries: number; sstables: number }> {
+  const res = await engineFetch("/api/stats");
+  if (!res.ok) throw new Error(`engine stats failed (HTTP ${res.status})`);
+  return (await res.json()) as { entries: number; sstables: number };
+}
+
+
+/** Force a memtable flush on the engine. */
+export async function flushEngine(): Promise<{ sstables: number }> {
+  const res = await engineFetch("/api/flush", { method: "POST" });
+  if (!res.ok) throw new Error(`flush failed (HTTP ${res.status})`);
+  return (await res.json()) as { sstables: number };
+}
+
+/** Trigger database compaction. */
+export async function compactEngine(): Promise<{ sstables: number }> {
+  const res = await engineFetch("/api/compact", { method: "POST" });
+  if (!res.ok) throw new Error(`compaction failed (HTTP ${res.status})`);
+  return (await res.json()) as { sstables: number };
+}
