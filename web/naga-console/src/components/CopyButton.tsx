@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CopyIcon, CheckIcon } from "./icons";
+import { copyToClipboard } from "@/lib/clipboard";
 
 /** A button that copies text to the clipboard and briefly shows a check. */
 export default function CopyButton({
@@ -13,22 +14,22 @@ export default function CopyButton({
   label?: string;
   className?: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    } catch {
-      // Clipboard can be blocked (e.g. insecure context); fail quietly.
-    }
+    const ok = await copyToClipboard(text);
+    setState(ok ? "copied" : "failed");
+    setTimeout(() => setState("idle"), 1600);
   }
+
+  const copied = state === "copied";
+  const failed = state === "failed";
 
   return (
     <button
       type="button"
       onClick={copy}
+      title={failed ? "Couldn't copy — select the text and copy manually" : undefined}
       className={`inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-[12px] font-medium text-muted transition hover:border-border-strong hover:text-foreground ${className}`}
     >
       {copied ? (
@@ -36,7 +37,11 @@ export default function CopyButton({
       ) : (
         <CopyIcon size={14} />
       )}
-      {label ? <span>{copied ? "Copied" : label}</span> : null}
+      {label || failed ? (
+        <span className={failed ? "text-danger" : undefined}>
+          {copied ? "Copied" : failed ? "Press ⌘/Ctrl+C" : label}
+        </span>
+      ) : null}
     </button>
   );
 }
