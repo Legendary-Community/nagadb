@@ -178,6 +178,44 @@ fn handle(mut stream: TcpStream, store: &SharedStore) -> std::io::Result<()> {
             }
         }
 
+        // Bulk insert using the engine's fast group-commit path: many key/value
+        // pairs, ONE disk sync. The body is newline-separated lines, each line
+        // being `<url-encoded-key>\t<url-encoded-value>`. This is the endpoint a
+        // load test (e.g. inserting a million users) should use.
+        ("POST", "/api/put_batch") => {
+            let text = String::from_utf8_lossy(&body);
+            let mut pairs: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+            for line in text.split('\n') {
+                if line.is_empty() {
+                    continue;
+                }
+                let mut it = line.splitn(2, '\t');
+                let key = url_decode(it.next().unwrap_or(""));
+                let value = url_decode(it.next().unwrap_or(""));
+                if key.is_empty() {
+                    continue;
+                }
+                pairs.push((key.into_bytes(), value.into_bytes()));
+            }
+
+            if pairs.is_empty() {
+                respond(
+                    &mut stream,
+                    400,
+                    "application/json",
+                    b"{\"ok\":false,\"error\":\"no pairs\"}",
+                )
+            } else {
+                let count = pairs.len();
+                {
+                    let mut store = store.write().unwrap_or_else(|p| p.into_inner());
+                    store.put_batch(&pairs)?;
+                }
+                let json = format!("{{\"ok\":true,\"count\":{count}}}");
+                respond(&mut stream, 200, "application/json", json.as_bytes())
+            }
+        }
+
         ("POST", "/api/delete") => {
             let params = parse_form(&body);
             match get_param(&params, "key") {
