@@ -52,36 +52,36 @@ export function Sidebar({ active }: { active?: NavKey }) {
   ];
 
   return (
-    <aside className="flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar">
-      {/* Brand */}
-      <div className="flex h-14 items-center border-b border-border px-4">
-        <Link href="/" className="inline-flex">
-          <Logo />
+    <aside className="flex w-[248px] shrink-0 flex-col border-r border-border bg-sidebar/95 backdrop-blur-md">
+      {/* Brand Logo Header */}
+      <div className="flex h-14 items-center border-b border-border/80 px-5">
+        <Link href="/" className="inline-flex items-center transform hover:scale-[1.02] transition-transform">
+          <Logo size={20} />
         </Link>
       </div>
 
-      {/* Workspace switcher */}
-      <div className="px-3 pt-3">
-        <button className="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-2.5 py-2 text-left transition hover:border-border-strong">
-          <span className="flex items-center gap-2.5">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent/15 text-[11px] font-bold text-accent">
+      {/* Workspace Switcher */}
+      <div className="px-4 pt-4">
+        <div className="group relative rounded-xl border border-border bg-surface/40 p-3 shadow-sm transition hover:border-border-strong hover:bg-surface/70">
+          <div className="flex items-center gap-3">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/15 text-[11px] font-bold text-accent shadow-[0_0_8px_rgba(0,229,153,0.15)]">
               N
             </span>
-            <span className="flex flex-col leading-tight">
-              <span className="text-[13px] font-medium text-foreground">
+            <div className="flex flex-col min-w-0 flex-1">
+              <span className="truncate text-[12px] font-bold text-foreground leading-tight">
                 My Workspace
               </span>
-              <span className="text-[11px] text-subtle">Free plan</span>
-            </span>
-          </span>
-          <ChevronDownIcon size={15} className="text-subtle" />
-        </button>
+              <span className="text-[10px] font-medium text-subtle mt-0.5">Free plan</span>
+            </div>
+            <ChevronDownIcon size={14} className="text-subtle transition-transform group-hover:translate-y-[1px]" />
+          </div>
+        </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex flex-col gap-0.5 px-3 pt-4">
-        <p className="px-2.5 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-subtle">
-          Console
+      {/* Nav Menu */}
+      <nav className="flex flex-col gap-1.5 px-4 pt-6">
+        <p className="px-2.5 pb-1 text-[10px] font-extrabold uppercase tracking-widest text-subtle/80">
+          Console Workspace
         </p>
         {items.map((it) => {
           const isActive = it.key === active;
@@ -89,13 +89,17 @@ export function Sidebar({ active }: { active?: NavKey }) {
             <Link
               key={it.key}
               href={it.href}
-              className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition ${
+              className={`flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-[13px] font-semibold transition-all duration-200 relative group ${
                 isActive
-                  ? "bg-surface-2 text-foreground"
-                  : "text-muted hover:bg-surface/70 hover:text-foreground"
+                  ? "bg-surface-2 text-foreground shadow-[inset_1px_0_0_var(--accent)]"
+                  : "text-muted hover:bg-surface/45 hover:text-foreground hover:translate-x-[2px]"
               }`}
             >
-              <span className={isActive ? "text-accent" : "text-subtle"}>
+              {/* Active Tab Glow Marker */}
+              {isActive && (
+                <span className="absolute left-0 top-1/4 bottom-1/4 w-[2.2px] rounded bg-accent shadow-[0_0_8px_var(--accent)]" />
+              )}
+              <span className={`transition-colors duration-200 ${isActive ? "text-accent" : "text-subtle group-hover:text-foreground"}`}>
                 {it.icon}
               </span>
               {it.label}
@@ -104,10 +108,13 @@ export function Sidebar({ active }: { active?: NavKey }) {
         })}
       </nav>
 
-      {/* Footer status */}
-      <div className="mt-auto border-t border-border p-3">
-        <div className="flex items-center gap-2 px-1.5 py-1 text-[12px] text-muted">
-          <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" />
+      {/* Footer Status Box */}
+      <div className="mt-auto p-4 border-t border-border/80">
+        <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl bg-surface/30 border border-border/50 text-[11px] font-medium text-muted">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-accent shadow-[0_0_8px_var(--accent)]"></span>
+          </span>
           All systems operational
         </div>
       </div>

@@ -3,10 +3,21 @@
 import { useEffect, useState } from "react";
 import type { ProjectWithConnection } from "@/lib/types";
 
+interface TransactionEvent {
+  op: string;
+  key: string;
+  status: string;
+  duration: string;
+  desc: string;
+  timestamp: number;
+}
+
 interface DBStats {
   online: boolean;
   totalKeys: number;
   sstables: number;
+  logs: TransactionEvent[];
+  opsRate: number;
 }
 
 export default function DatabaseOverview({
@@ -18,14 +29,15 @@ export default function DatabaseOverview({
     online: false,
     totalKeys: 0,
     sstables: 0,
+    logs: [],
+    opsRate: 0,
   });
   const [loading, setLoading] = useState(true);
-  const [opsRate, setOpsRate] = useState(0);
   const [chartPoints, setChartPoints] = useState<number[]>(
-    Array.from({ length: 15 }, () => Math.floor(Math.random() * 40) + 10)
+    Array.from({ length: 15 }, () => 0)
   );
 
-  // Poll stats and generate live ops activity
+  // Poll stats and real activity logs
   useEffect(() => {
     async function fetchStats() {
       try {
@@ -33,8 +45,14 @@ export default function DatabaseOverview({
           cache: "no-store",
         });
         if (res.ok) {
-          const data = await res.json();
+          const data = (await res.json()) as DBStats;
           setStats(data);
+          
+          // Append the real ops rate to the sparkline history
+          setChartPoints((prev) => {
+            const nextVal = data.online ? Math.max(Math.floor(data.opsRate * 12), 4) : 0;
+            return [...prev.slice(1), nextVal];
+          });
         }
       } catch {
         // ignore
@@ -44,46 +62,15 @@ export default function DatabaseOverview({
     }
 
     fetchStats();
-    const interval = setInterval(fetchStats, 5000);
+    const interval = setInterval(fetchStats, 1000); // 1-second refresh for high fidelity
     return () => clearInterval(interval);
   }, [project.id]);
-
-  // Animate OPS chart and rates
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (stats.online) {
-        const base = stats.totalKeys > 0 ? 80 : 0;
-        const variation = base > 0 ? Math.floor(Math.random() * 50) - 25 : 0;
-        const currentOps = Math.max(base + variation, 0);
-        setOpsRate(currentOps);
-
-        setChartPoints((prev) => {
-          const next = [...prev.slice(1), Math.max(Math.floor(currentOps / 3), 5)];
-          return next;
-        });
-      } else {
-        setOpsRate(0);
-        setChartPoints((prev) => [...prev.slice(1), 0]);
-      }
-    }, 1500);
-
-    return () => clearInterval(interval);
-  }, [stats.online, stats.totalKeys]);
-
-  // Render mock activity logs
-  const activityLogs = [
-    { op: "PUT", key: `user:sofia.${Math.floor(Math.random() * 1000)}`, status: "Success", duration: "0.21ms", desc: "WAL Logged · Memtable" },
-    { op: "GET", key: `user:mateo.${Math.floor(Math.random() * 1000)}`, status: "Success", duration: "0.04ms", desc: "Memtable Hit" },
-    { op: "GET", key: "session:inactive_token", status: "Not Found", duration: "0.09ms", desc: "Bloom Filter Short-Circuit" },
-    { op: "DELETE", key: `user:sofia.${Math.floor(Math.random() * 1000)}`, status: "Success", duration: "0.14ms", desc: "Tombstone Written" },
-    { op: "COMPACT", key: "SSTable compaction", status: "Success", duration: "11.42ms", desc: "SsTables Cleaned & Merged" },
-  ];
 
   // SVG Chart path calculation
   const width = 500;
   const height = 120;
   const padding = 10;
-  const maxVal = Math.max(...chartPoints, 50);
+  const maxVal = Math.max(...chartPoints, 40);
   const pointsString = chartPoints
     .map((val, index) => {
       const x = padding + (index * (width - padding * 2)) / (chartPoints.length - 1);
@@ -156,12 +143,12 @@ export default function DatabaseOverview({
                 Performance Monitor
               </h3>
               <p className="text-[11px] text-muted">
-                Throughput rate (Operations per second)
+                Real-time throughput (Operations per second)
               </p>
             </div>
             <div className="text-right">
               <span className="font-mono text-[16px] font-bold text-accent">
-                {opsRate}
+                {stats.opsRate}
               </span>
               <span className="text-[11px] text-muted ml-1">OPS</span>
             </div>
@@ -180,7 +167,7 @@ export default function DatabaseOverview({
               {/* Polyline area gradient */}
               <defs>
                 <linearGradient id="grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.15" />
+                  <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.12" />
                   <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.0" />
                 </linearGradient>
               </defs>
@@ -193,7 +180,7 @@ export default function DatabaseOverview({
               <polyline
                 fill="none"
                 stroke="var(--accent)"
-                strokeWidth="2"
+                strokeWidth="2.2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 points={pointsString}
@@ -234,44 +221,56 @@ export default function DatabaseOverview({
           Recent Core Activity
         </h3>
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="border-b border-border text-[11px] uppercase tracking-wider text-subtle">
-              <tr>
-                <th className="py-2.5 font-medium">Operation</th>
-                <th className="py-2.5 font-medium">Target / Key</th>
-                <th className="py-2.5 font-medium">Result</th>
-                <th className="py-2.5 font-medium">Latency</th>
-                <th className="py-2.5 font-medium">Details</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/40 text-[12px] font-mono">
-              {activityLogs.map((log, idx) => (
-                <tr key={idx} className="text-muted hover:text-foreground">
-                  <td className="py-3 font-semibold text-foreground">
-                    <span
-                      className={`inline-block rounded px-1.5 py-0.5 text-[10px] ${
-                        log.op === "PUT"
-                          ? "bg-accent/10 text-accent"
-                          : log.op === "GET"
-                          ? "bg-surface-3 text-muted"
-                          : log.op === "DELETE"
-                          ? "bg-danger/10 text-danger"
-                          : "bg-warning/10 text-warning"
-                      }`}
-                    >
-                      {log.op}
-                    </span>
-                  </td>
-                  <td className="py-3 text-foreground">{log.key}</td>
-                  <td className="py-3">
-                    <span className="text-accent">✓ {log.status}</span>
-                  </td>
-                  <td className="py-3 text-foreground">{log.duration}</td>
-                  <td className="py-3 text-subtle font-sans">{log.desc}</td>
+          {stats.logs.length === 0 ? (
+            <div className="py-8 text-center text-[12px] text-muted">
+              No transactions recorded yet. Modify records in the Data Browser to see activity.
+            </div>
+          ) : (
+            <table className="w-full text-left">
+              <thead className="border-b border-border text-[11px] uppercase tracking-wider text-subtle">
+                <tr>
+                  <th className="py-2.5 font-medium">Operation</th>
+                  <th className="py-2.5 font-medium">Target / Key</th>
+                  <th className="py-2.5 font-medium">Result</th>
+                  <th className="py-2.5 font-medium">Latency</th>
+                  <th className="py-2.5 font-medium">Details</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border/40 text-[12px] font-mono">
+                {stats.logs.map((log, idx) => (
+                  <tr key={idx} className="text-muted hover:text-foreground">
+                    <td className="py-3 font-semibold text-foreground">
+                      <span
+                        className={`inline-block rounded px-1.5 py-0.5 text-[10px] ${
+                          log.op === "PUT"
+                            ? "bg-accent/10 text-accent"
+                            : log.op === "GET"
+                            ? "bg-surface-3 text-muted"
+                            : log.op === "DELETE"
+                            ? "bg-danger/10 text-danger"
+                            : log.op === "COMPACT" || log.op === "FLUSH"
+                            ? "bg-warning/10 text-warning"
+                            : "bg-surface-2 text-subtle"
+                        }`}
+                      >
+                        {log.op}
+                      </span>
+                    </td>
+                    <td className="py-3 text-foreground truncate max-w-[180px]" title={log.key}>
+                      {log.key}
+                    </td>
+                    <td className="py-3">
+                      <span className={log.status === "Success" ? "text-accent" : "text-danger"}>
+                        {log.status === "Success" ? "✓ Success" : "✗ Failed"}
+                      </span>
+                    </td>
+                    <td className="py-3 text-foreground">{log.duration}</td>
+                    <td className="py-3 text-subtle font-sans">{log.desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>
