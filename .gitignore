@@ -11,8 +11,12 @@ sdk/**/node_modules/
 test/**/node_modules/
 
 # ---- Runtime data (never commit a database's contents) ----
-data/
-**/data/
+# NOTE: keep these anchored to real runtime dirs. A bare `data/` or `**/data/`
+# also matches the SOURCE route folder src/app/api/projects/[id]/data/, which
+# silently dropped that route from git and broke the console on the server.
+/data/
+/api/data/
+/engine/data/
 *.wal
 *.sst
 web/naga-console/.data/
