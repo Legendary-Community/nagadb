@@ -16,6 +16,9 @@ interface DBStats {
   online: boolean;
   totalKeys: number;
   sstables: number;
+}
+
+interface ActivityStats {
   logs: TransactionEvent[];
   opsRate: number;
 }
@@ -29,6 +32,8 @@ export default function DatabaseOverview({
     online: false,
     totalKeys: 0,
     sstables: 0,
+  });
+  const [activity, setActivity] = useState<ActivityStats>({
     logs: [],
     opsRate: 0,
   });
@@ -37,7 +42,7 @@ export default function DatabaseOverview({
     Array.from({ length: 15 }, () => 0)
   );
 
-  // Poll stats and real activity logs
+  // Poll static engine stats (slow interval: 15 seconds)
   useEffect(() => {
     async function fetchStats() {
       try {
@@ -47,12 +52,6 @@ export default function DatabaseOverview({
         if (res.ok) {
           const data = (await res.json()) as DBStats;
           setStats(data);
-          
-          // Append the real ops rate to the sparkline history
-          setChartPoints((prev) => {
-            const nextVal = data.online ? Math.max(Math.floor(data.opsRate * 12), 4) : 0;
-            return [...prev.slice(1), nextVal];
-          });
         }
       } catch {
         // ignore
@@ -62,9 +61,35 @@ export default function DatabaseOverview({
     }
 
     fetchStats();
-    const interval = setInterval(fetchStats, 1000); // 1-second refresh for high fidelity
+    const interval = setInterval(fetchStats, 15000);
     return () => clearInterval(interval);
   }, [project.id]);
+
+  // Poll local Next.js in-memory transaction logs (fast interval: 1.5 seconds)
+  useEffect(() => {
+    async function fetchActivity() {
+      try {
+        const res = await fetch(`/api/projects/${project.id}/activity`, {
+          cache: "no-store",
+        });
+        if (res.ok) {
+          const data = (await res.json()) as ActivityStats;
+          setActivity(data);
+          
+          setChartPoints((prev) => {
+            const nextVal = stats.online ? Math.max(Math.floor(data.opsRate * 12), 4) : 0;
+            return [...prev.slice(1), nextVal];
+          });
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    fetchActivity();
+    const interval = setInterval(fetchActivity, 1500);
+    return () => clearInterval(interval);
+  }, [project.id, stats.online]);
 
   // SVG Chart path calculation
   const width = 500;
@@ -148,7 +173,7 @@ export default function DatabaseOverview({
             </div>
             <div className="text-right">
               <span className="font-mono text-[16px] font-bold text-accent">
-                {stats.opsRate}
+                {activity.opsRate}
               </span>
               <span className="text-[11px] text-muted ml-1">OPS</span>
             </div>
@@ -221,7 +246,7 @@ export default function DatabaseOverview({
           Recent Core Activity
         </h3>
         <div className="overflow-x-auto">
-          {stats.logs.length === 0 ? (
+          {activity.logs.length === 0 ? (
             <div className="py-8 text-center text-[12px] text-muted">
               No transactions recorded yet. Modify records in the Data Browser to see activity.
             </div>
@@ -237,7 +262,7 @@ export default function DatabaseOverview({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/40 text-[12px] font-mono">
-                {stats.logs.map((log, idx) => (
+                {activity.logs.map((log, idx) => (
                   <tr key={idx} className="text-muted hover:text-foreground">
                     <td className="py-3 font-semibold text-foreground">
                       <span
