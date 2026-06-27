@@ -12,9 +12,17 @@ import type { Project, ProjectWithConnection } from "./types";
 const DATA_DIR = path.join(process.cwd(), ".data");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 
-/** Where apps connect. Overridable so the same console works on a VPS. */
-const PUBLIC_HOST =
-  process.env.NEXT_PUBLIC_NAGADB_HOST ?? "http://127.0.0.1:9000";
+/**
+ * Where apps connect, shown in the connection string. Overridable so the same
+ * console works on a VPS.
+ *
+ * This is read at RUNTIME (note: NOT a `NEXT_PUBLIC_` var — those get baked in
+ * at build time, so they can't be changed by the installer afterwards). It's
+ * only used in server-side code here, so a plain runtime env var is correct.
+ */
+function publicHost(): string {
+  return process.env.NAGADB_PUBLIC_HOST ?? "http://127.0.0.1:9000";
+}
 
 // --- low-level file helpers -------------------------------------------------
 
@@ -60,13 +68,14 @@ function generateApiKey(): string {
 
 /** Attach the HTTP URL and a Postgres-style connection string to a project. */
 export function withConnection(p: Project): ProjectWithConnection {
+  const host = publicHost();
   // Strip protocol for the connection-string host segment.
-  const host = PUBLIC_HOST.replace(/^https?:\/\//, "");
+  const hostNoScheme = host.replace(/^https?:\/\//, "");
   return {
     ...p,
-    httpUrl: `${PUBLIC_HOST}/db/${p.id}`,
+    httpUrl: `${host}/db/${p.id}`,
     // Looks like a database connection string people already know.
-    connectionString: `nagadb://${p.id}:${p.apiKey}@${host}/${p.id}?ssl=require`,
+    connectionString: `nagadb://${p.id}:${p.apiKey}@${hostNoScheme}/${p.id}?ssl=require`,
   };
 }
 

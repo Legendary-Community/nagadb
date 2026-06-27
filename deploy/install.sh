@@ -76,7 +76,14 @@ sudo -u "$RUN_USER" bash -lc "cd '$INSTALL_DIR/api' && '$CARGO' build --release"
 log "Building the web console..."
 sudo -u "$RUN_USER" bash -lc "cd '$INSTALL_DIR/web/naga-console' && npm install && npm run build"
 
-# --- 7. systemd: the engine (storage backend, localhost only) -------------
+# Detect the server's public IP so the console can show a real connection URL
+# (instead of 127.0.0.1) and the engine can be reached from other machines.
+PUBLIC_IP="$(curl -fsSL https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
+
+# --- 7. systemd: the engine (storage backend) -----------------------------
+# Binds 0.0.0.0:9000 so apps can connect using the connection string. NOTE:
+# the engine has no authentication yet — protect port 9000 with a firewall and
+# only allow trusted sources, or front it with a reverse proxy + auth.
 log "Installing systemd services..."
 cat >/etc/systemd/system/nagadb-engine.service <<EOF
 [Unit]
@@ -87,6 +94,7 @@ After=network.target
 Type=simple
 User=$RUN_USER
 WorkingDirectory=$INSTALL_DIR/api
+Environment=NAGADB_ADDR=0.0.0.0:$ENGINE_PORT
 ExecStart=$INSTALL_DIR/api/target/release/api-server
 Restart=on-failure
 RestartSec=2
@@ -110,6 +118,7 @@ Environment=NODE_ENV=production
 Environment=PORT=$CONSOLE_PORT
 Environment=HOSTNAME=0.0.0.0
 Environment=NAGADB_ENGINE_URL=http://127.0.0.1:$ENGINE_PORT
+Environment=NAGADB_PUBLIC_HOST=http://$PUBLIC_IP:$ENGINE_PORT
 ExecStart=/usr/bin/npm start
 Restart=on-failure
 RestartSec=2
@@ -127,14 +136,14 @@ systemctl restart nagadb-engine.service
 systemctl restart nagadb-console.service
 
 # --- 10. Report -----------------------------------------------------------
-IP="$(curl -fsSL https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
 log "Done! nagadb is running."
 cat <<EOF
 
-  Console (open in browser):  http://$IP:$CONSOLE_PORT
-  Engine  (localhost only)  :  http://127.0.0.1:$ENGINE_PORT
+  Console (open in browser):  http://$PUBLIC_IP:$CONSOLE_PORT
+  Engine  (apps connect to):  http://$PUBLIC_IP:$ENGINE_PORT
 
   Click "Create Database" in the console to make a DB and get a URL.
+  The connection string now shows $PUBLIC_IP instead of 127.0.0.1.
 
   Manage it:
     sudo systemctl status  nagadb-console nagadb-engine
@@ -143,7 +152,7 @@ cat <<EOF
 
   Re-deploy after pushing new code:  re-run this same install command.
 
-  SECURITY: the console is public on port $CONSOLE_PORT with NO login.
-  For real use, put it behind a reverse proxy (nginx/Caddy) with HTTPS + auth,
-  and open only that port in your firewall.
+  SECURITY: the console (port $CONSOLE_PORT) and engine (port $ENGINE_PORT) are
+  public with NO login. For real use, put them behind a reverse proxy
+  (nginx/Caddy) with HTTPS + auth, and restrict these ports in your firewall.
 EOF

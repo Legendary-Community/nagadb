@@ -45,8 +45,10 @@ fn main() -> std::io::Result<()> {
     // The engine stores its files in ./data (same place the demo used).
     let store: SharedStore = Arc::new(RwLock::new(Store::open("data")?));
 
-    let addr = "127.0.0.1:9000";
-    let listener = TcpListener::bind(addr)?;
+    // Where to listen. Defaults to localhost-only (safe). Set NAGADB_ADDR to
+    // 0.0.0.0:9000 to accept connections from other machines (e.g. on a VPS).
+    let addr = std::env::var("NAGADB_ADDR").unwrap_or_else(|_| "127.0.0.1:9000".to_string());
+    let listener = TcpListener::bind(&addr)?;
 
     // One worker per CPU core (falls back to 4 if we can't detect it).
     let workers = std::thread::available_parallelism()
