@@ -6,6 +6,19 @@ import { Button } from "./ui";
 import { SearchIcon, RefreshIcon, TrashIcon } from "./icons";
 
 /**
+ * Parse a response as JSON, but never throw if the body isn't JSON (e.g. an
+ * HTML error page). Returns null in that case so callers can fall back to a
+ * clean "HTTP <status>" message instead of a cryptic JSON-parse error.
+ */
+async function readJsonSafe(res: Response): Promise<any> {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A live key/value browser for one database. It reads and writes through the
  * console's API routes, which proxy to the real nagadb engine.
  */
@@ -31,10 +44,10 @@ export default function DataBrowser({ projectId }: { projectId: string }) {
         setEntries([]);
         return;
       }
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "failed to load");
+      const data = await readJsonSafe(res);
+      if (!res.ok) throw new Error(data?.error ?? `failed to load (HTTP ${res.status})`);
       setOffline(false);
-      setEntries(data.entries ?? []);
+      setEntries(data?.entries ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to load");
     } finally {
@@ -57,8 +70,8 @@ export default function DataBrowser({ projectId }: { projectId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key, value }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "write failed");
+      const data = await readJsonSafe(res);
+      if (!res.ok) throw new Error(data?.error ?? `write failed (HTTP ${res.status})`);
       setKey("");
       setValue("");
       await load();
@@ -76,8 +89,8 @@ export default function DataBrowser({ projectId }: { projectId: string }) {
         `/api/projects/${projectId}/data?key=${encodeURIComponent(k)}`,
         { method: "DELETE" }
       );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "delete failed");
+      const data = await readJsonSafe(res);
+      if (!res.ok) throw new Error(data?.error ?? `delete failed (HTTP ${res.status})`);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "delete failed");

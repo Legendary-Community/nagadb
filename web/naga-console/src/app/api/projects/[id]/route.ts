@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getProject, deleteProject } from "@/lib/store";
 
+// Always run live (never prerender/cache): this reads the project registry.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type Params = { params: Promise<{ id: string }> };
 
 // GET /api/projects/:id -> one database with its connection details

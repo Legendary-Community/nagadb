@@ -10,6 +10,10 @@ import { getProject } from "@/lib/store";
 
 type Params = { params: Promise<{ id: string }> };
 
+// Always render live so a newly created database is found immediately (don't
+// prerender this page at build time, when no databases exist yet).
+export const dynamic = "force-dynamic";
+
 export default async function ProjectPage({ params }: Params) {
   const { id } = await params;
   const project = await getProject(id);
