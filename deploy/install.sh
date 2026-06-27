@@ -74,7 +74,9 @@ sudo -u "$RUN_USER" bash -lc "cd '$INSTALL_DIR/api' && '$CARGO' build --release"
 
 # --- 6. Build the web console ---------------------------------------------
 log "Building the web console..."
-sudo -u "$RUN_USER" bash -lc "cd '$INSTALL_DIR/web/naga-console' && npm install && npm run build"
+# Wipe the previous build cache so an update never serves stale JS/CSS (that's
+# what kept showing old behaviour after a redeploy).
+sudo -u "$RUN_USER" bash -lc "cd '$INSTALL_DIR/web/naga-console' && rm -rf .next && npm install && npm run build"
 
 # Detect the server's public IP so the console can show a real connection URL
 # (instead of 127.0.0.1) and the engine can be reached from other machines.
