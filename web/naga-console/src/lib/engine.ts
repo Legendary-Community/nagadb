@@ -1,0 +1,106 @@
+// The bridge from the console to the actual nagadb engine (the Rust API server).
+//
+// Today there is one shared engine. To give each project its own isolated
+// database, we namespace every key with the project id:  "db:<id>:<key>".
+// The console hides that prefix, so each project looks like its own database.
+// When the engine becomes multi-database for real, only this file changes.
+
+import type { Entry } from "./types";
+
+const ENGINE_URL =
+  process.env.NAGADB_ENGINE_URL ?? "http://127.0.0.1:9000";
+
+/** Thrown when the engine server can't be reached. */
+export class EngineOfflineError extends Error {
+  constructor() {
+    super("nagadb engine is not reachable");
+    this.name = "EngineOfflineError";
+  }
+}
+
+/** The per-project key prefix that isolates one database from another. */
+function prefix(projectId: string): string {
+  return `db:${projectId}:`;
+}
+
+async function engineFetch(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(ENGINE_URL + path, {
+      ...init,
+      // Always talk to the engine fresh; never cache.
+      cache: "no-store",
+    });
+  } catch {
+    throw new EngineOfflineError();
+  }
+}
+
+/** Is the engine up? Used to show a friendly status in the UI. */
+export async function engineOnline(): Promise<boolean> {
+  try {
+    const res = await engineFetch("/api/stats");
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Save a key/value pair inside a project's database. */
+export async function putEntry(
+  projectId: string,
+  key: string,
+  value: string
+): Promise<void> {
+  const body = new URLSearchParams({
+    key: prefix(projectId) + key,
+    value,
+  }).toString();
+  const res = await engineFetch("/api/put", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!res.ok) throw new Error(`engine put failed (HTTP ${res.status})`);
+}
+
+/** Read one key from a project's database, or null if absent. */
+export async function getEntry(
+  projectId: string,
+  key: string
+): Promise<string | null> {
+  const query = new URLSearchParams({ key: prefix(projectId) + key }).toString();
+  const res = await engineFetch(`/api/get?${query}`);
+  if (!res.ok) throw new Error(`engine get failed (HTTP ${res.status})`);
+  const data = (await res.json()) as { found: boolean; value: string | null };
+  return data.found ? data.value : null;
+}
+
+/** Delete one key from a project's database. */
+export async function deleteEntry(
+  projectId: string,
+  key: string
+): Promise<void> {
+  const body = new URLSearchParams({ key: prefix(projectId) + key }).toString();
+  const res = await engineFetch("/api/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!res.ok) throw new Error(`engine delete failed (HTTP ${res.status})`);
+}
+
+/** List every key/value pair in a project's database (prefix stripped). */
+export async function listEntries(projectId: string): Promise<Entry[]> {
+  const res = await engineFetch("/api/list");
+  if (!res.ok) throw new Error(`engine list failed (HTTP ${res.status})`);
+  const all = (await res.json()) as Entry[];
+  const p = prefix(projectId);
+  return all
+    .filter((e) => e.key.startsWith(p))
+    .map((e) => ({ key: e.key.slice(p.length), value: e.value }));
+}
+
+/** How many keys a project's database holds. */
+export async function countEntries(projectId: string): Promise<number> {
+  return (await listEntries(projectId)).length;
+}

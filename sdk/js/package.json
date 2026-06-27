@@ -1,0 +1,35 @@
+{
+  "name": "nagadb",
+  "version": "0.1.0",
+  "description": "Official JavaScript/TypeScript client for nagadb — a friendly NoSQL database.",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "files": [
+    "src/",
+    "index.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "example": "node example.js"
+  },
+  "keywords": [
+    "nagadb",
+    "database",
+    "nosql",
+    "key-value",
+    "lsm",
+    "client",
+    "sdk"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

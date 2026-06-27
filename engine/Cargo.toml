@@ -1,0 +1,17 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2021"
+description = "A fast, friendly NoSQL database engine (storage core)."
+
+[[bin]]
+name = "engine-demo"
+path = "src/main.rs"
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"
+
+[lib]
+name = "engine"
+path = "src/lib.rs"

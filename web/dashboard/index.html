@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>nagadb · console</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="logo">◆</span>
+        <span class="brand-name">nagadb</span>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="overview">
+          <span class="ic">▣</span> Overview
+        </button>
+        <button class="nav-item" data-view="data">
+          <span class="ic">▤</span> Data
+        </button>
+        <button class="nav-item" data-view="query">
+          <span class="ic">⌘</span> Query
+        </button>
+        <button class="nav-item" data-view="monitoring">
+          <span class="ic">📈</span> Monitoring
+        </button>
+        <button class="nav-item" data-view="settings">
+          <span class="ic">⚙</span> Settings
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="conn">
+          <span class="dot" id="connDot"></span>
+          <span id="connText">connecting…</span>
+        </div>
+        <div class="branch">main · 127.0.0.1:9000</div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="topbar">
+        <div class="crumbs">
+          <span class="crumb-muted">nagadb</span>
+          <span class="sep">/</span>
+          <span id="crumbView">Overview</span>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn ghost" id="refreshBtn">↻ Refresh</button>
+        </div>
+      </header>
+
+      <!-- OVERVIEW -->
+      <section class="view" id="view-overview">
+        <h1>Overview</h1>
+        <p class="muted">A from-scratch LSM-tree database — serious power, easy to drive.</p>
+
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">Total keys</div>
+            <div class="stat-value" id="statKeys">—</div>
+            <div class="stat-sub">live key/value entries</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">SSTable files</div>
+            <div class="stat-value" id="statSstables">—</div>
+            <div class="stat-sub">flushed to disk</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Engine step</div>
+            <div class="stat-value">2</div>
+            <div class="stat-sub">WAL · memtable · SSTables</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Status</div>
+            <div class="stat-value ok" id="statStatus">●</div>
+            <div class="stat-sub" id="statStatusText">checking…</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Quick add</h2>
+          </div>
+          <form class="inline-form" id="quickForm">
+            <input type="text" id="qKey" placeholder="key (e.g. user:1:name)" autocomplete="off" />
+            <input type="text" id="qValue" placeholder="value (e.g. Alice)" autocomplete="off" />
+            <button class="btn" type="submit">Save</button>
+          </form>
+          <div class="form-msg" id="quickMsg"></div>
+        </div>
+      </section>
+
+      <!-- DATA -->
+      <section class="view hidden" id="view-data">
+        <h1>Data</h1>
+        <p class="muted">Browse, edit, and delete every key/value in the store.</p>
+
+        <div class="toolbar">
+          <input type="text" id="search" class="search" placeholder="Filter keys or values…" />
+          <span class="count-pill" id="dataCount">0 rows</span>
+          <div class="spacer"></div>
+          <button class="btn ghost" id="addRowBtn">+ Add row</button>
+        </div>
+
+        <div class="panel no-pad">
+          <table class="data-table">
+            <thead>
+              <tr><th style="width:38%">Key</th><th>Value</th><th style="width:120px"></th></tr>
+            </thead>
+            <tbody id="dataRows"></tbody>
+          </table>
+          <div class="empty" id="dataEmpty">No data yet. Add your first key above.</div>
+        </div>
+      </section>
+
+      <!-- QUERY -->
+      <section class="view hidden" id="view-query">
+        <h1>Query console</h1>
+        <p class="muted">Run engine commands directly. Type <code>help</code> for the command list.</p>
+
+        <div class="console">
+          <div class="console-out" id="consoleOut"></div>
+          <div class="console-in">
+            <span class="prompt">›</span>
+            <input type="text" id="consoleInput" autocomplete="off" spellcheck="false"
+                   placeholder="e.g. put user:1 Alice  ·  get user:1  ·  scan  ·  flush" />
+          </div>
+        </div>
+        <div class="hint">
+          Commands: <code>get &lt;key&gt;</code> · <code>put &lt;key&gt; &lt;value&gt;</code> ·
+          <code>delete &lt;key&gt;</code> · <code>scan</code> · <code>flush</code> ·
+          <code>compact</code> · <code>stats</code> · <code>clear</code>
+        </div>
+      </section>
+
+      <!-- MONITORING -->
+      <section class="view hidden" id="view-monitoring">
+        <h1>Monitoring</h1>
+        <p class="muted">Live engine metrics, refreshed every few seconds.</p>
+
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">Live keys</div>
+            <div class="stat-value" id="monKeys">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">SSTables on disk</div>
+            <div class="stat-value" id="monSstables">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Last poll</div>
+            <div class="stat-value small" id="monTime">—</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Keys over time</h2></div>
+          <div class="spark" id="spark"></div>
+          <div class="form-msg" id="monNote">Sampled while this page is open.</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Maintenance</h2></div>
+          <p class="muted" style="margin:0 0 14px">
+            <strong>Flush</strong> writes the in-memory memtable to a new SSTable.
+            <strong>Compact</strong> merges all SSTables into one, dropping stale
+            values and tombstones.
+          </p>
+          <div class="inline-form">
+            <button class="btn ghost" id="flushBtn">Flush memtable</button>
+            <button class="btn" id="compactBtn">Compact SSTables</button>
+          </div>
+          <div class="form-msg" id="maintMsg"></div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view hidden" id="view-settings">
+        <h1>Settings</h1>
+        <p class="muted">Connection details and API reference.</p>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Connection</h2></div>
+          <div class="kv"><span>Host</span><code>127.0.0.1</code></div>
+          <div class="kv"><span>Port</span><code>9000</code></div>
+          <div class="kv"><span>Base URL</span><code>http://127.0.0.1:9000</code></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>HTTP API</h2></div>
+          <div class="kv"><span><code>GET /api/list</code></span> all key/value pairs (JSON)</div>
+          <div class="kv"><span><code>GET /api/get?key=K</code></span> look up one key</div>
+          <div class="kv"><span><code>GET /api/stats</code></span> entry &amp; SSTable counts</div>
+          <div class="kv"><span><code>POST /api/put</code></span> body <code>key=…&amp;value=…</code></div>
+          <div class="kv"><span><code>POST /api/delete</code></span> body <code>key=…</code></div>
+          <div class="kv"><span><code>POST /api/flush</code></span> flush memtable → SSTable</div>
+          <div class="kv"><span><code>POST /api/compact</code></span> merge all SSTables into one</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

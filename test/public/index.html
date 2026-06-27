@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>nagadb — Auth Demo</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <!-- Auth card -->
+      <main class="card">
+        <div class="brand">
+          <span class="dot"></span>
+          <span>naga<span class="accent">db</span></span>
+        </div>
+        <p class="subtitle">Auth demo — sign up &amp; log in, backed by your database.</p>
+
+        <!-- Tabs -->
+        <div class="tabs">
+          <button class="tab active" data-tab="login">Log in</button>
+          <button class="tab" data-tab="signup">Sign up</button>
+        </div>
+
+        <!-- Forms -->
+        <form id="authForm" autocomplete="off">
+          <label for="email">Email</label>
+          <input id="email" type="email" placeholder="you@example.com" required />
+
+          <label for="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            placeholder="••••••••"
+            minlength="6"
+            required
+          />
+
+          <button id="submitBtn" type="submit" class="primary">Log in</button>
+          <p id="message" class="message"></p>
+        </form>
+
+        <!-- Logged-in state -->
+        <div id="loggedIn" class="logged-in hidden">
+          <div class="check">✓</div>
+          <h2>Welcome, <span id="whoEmail"></span></h2>
+          <p class="muted">You are authenticated against database <code id="whoDb"></code>.</p>
+          <button id="logoutBtn" class="ghost">Log out</button>
+        </div>
+      </main>
+
+      <!-- Live DB panel -->
+      <aside class="panel">
+        <div class="panel-head">
+          <h3>Users in database</h3>
+          <button id="refreshUsers" class="ghost small">Refresh</button>
+        </div>
+        <p class="muted small">
+          This reads straight from nagadb. Each user is stored as a JSON value.
+        </p>
+        <div id="users" class="users"></div>
+      </aside>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

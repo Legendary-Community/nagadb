@@ -1,0 +1,24 @@
+# ---- Rust ----
+**/target/
+**/*.rs.bk
+
+# ---- Node / Next.js ----
+**/node_modules/
+web/naga-console/.next/
+web/naga-console/out/
+web/naga-console/next-env.d.ts
+sdk/**/node_modules/
+test/**/node_modules/
+
+# ---- Runtime data (never commit a database's contents) ----
+data/
+**/data/
+*.wal
+*.sst
+web/naga-console/.data/
+
+# ---- OS / editor ----
+.DS_Store
+*.log
+.env
+.env.local

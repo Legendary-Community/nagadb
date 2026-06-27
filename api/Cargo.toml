@@ -1,0 +1,12 @@
+[package]
+name = "api"
+version = "0.1.0"
+edition = "2021"
+description = "HTTP API server that puts the engine behind a web dashboard."
+
+[dependencies]
+engine = { path = "../engine" }
+
+[[bin]]
+name = "api-server"
+path = "src/main.rs"
