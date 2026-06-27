@@ -36,10 +36,7 @@ use pool::ThreadPool;
 /// access (`put`, `delete`, `flush`, `compact`).
 type SharedStore = Arc<RwLock<Store>>;
 
-/// The dashboard files are compiled straight into the program from web/dashboard/.
-const DASH_HTML: &str = include_str!("../../web/dashboard/index.html");
-const DASH_CSS: &str = include_str!("../../web/dashboard/styles.css");
-const DASH_JS: &str = include_str!("../../web/dashboard/app.js");
+
 
 fn main() -> std::io::Result<()> {
     // The engine stores its files in ./data (same place the demo used).
@@ -57,8 +54,8 @@ fn main() -> std::io::Result<()> {
     let pool = ThreadPool::new(workers);
 
     println!("============================================");
-    println!("  Dashboard running!");
-    println!("  Open this in your browser:  http://{addr}");
+    println!("  nagadb engine running!");
+    println!("  Address:  http://{addr}");
     println!("  Serving with {workers} worker threads.");
     println!("  Press Ctrl+C to stop.");
     println!("============================================");
@@ -95,22 +92,8 @@ fn handle(mut stream: TcpStream, store: &SharedStore) -> std::io::Result<()> {
         ("GET", "/") => respond(
             &mut stream,
             200,
-            "text/html; charset=utf-8",
-            DASH_HTML.as_bytes(),
-        ),
-
-        ("GET", "/styles.css") => respond(
-            &mut stream,
-            200,
-            "text/css; charset=utf-8",
-            DASH_CSS.as_bytes(),
-        ),
-
-        ("GET", "/app.js") => respond(
-            &mut stream,
-            200,
-            "application/javascript; charset=utf-8",
-            DASH_JS.as_bytes(),
+            "text/plain; charset=utf-8",
+            b"nagadb storage engine is running",
         ),
 
         ("GET", "/api/list") => {

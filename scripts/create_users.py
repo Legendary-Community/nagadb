@@ -18,12 +18,14 @@ import argparse
 import concurrent.futures
 import hashlib
 import json
+import random
 import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import date, timedelta
 
 
 # --------------------------------------------------------------------------- #
@@ -42,21 +44,69 @@ def parse_connection(url: str):
 
 
 # --------------------------------------------------------------------------- #
-# One user account
+# One user account (realistic, varied data)
 # --------------------------------------------------------------------------- #
+FIRST_NAMES = [
+    "James", "Mary", "John", "Patricia", "Robert", "Jennifer", "Michael",
+    "Linda", "David", "Elizabeth", "William", "Barbara", "Sofia", "Mateo",
+    "Olivia", "Liam", "Emma", "Noah", "Ava", "Lucas", "Mia", "Ethan",
+    "Isabella", "Aarav", "Priya", "Wei", "Yuki", "Omar", "Fatima", "Chen",
+    "Ananya", "Hiroshi", "Amara", "Diego", "Zara", "Ivan", "Nina", "Kofi",
+]
+LAST_NAMES = [
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
+    "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez",
+    "Wilson", "Anderson", "Patel", "Kim", "Nguyen", "Chen", "Singh",
+    "Kumar", "Sato", "Tanaka", "Ali", "Khan", "Okafor", "Mensah", "Rossi",
+    "Muller", "Schmidt", "Ivanov", "Petrov", "Silva", "Santos", "Costa",
+]
+DOMAINS = [
+    "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
+    "proton.me", "fastmail.com",
+]
+LOCATIONS = [
+    ("US", "New York"), ("US", "San Francisco"), ("GB", "London"),
+    ("CA", "Toronto"), ("DE", "Berlin"), ("FR", "Paris"), ("JP", "Tokyo"),
+    ("IN", "Mumbai"), ("BR", "Sao Paulo"), ("AU", "Sydney"), ("NG", "Lagos"),
+    ("AE", "Dubai"), ("SG", "Singapore"), ("ES", "Madrid"), ("NL", "Amsterdam"),
+]
+# Weighted so most users are on the free plan, like a real product.
+PLANS = ["free", "free", "free", "free", "pro", "pro", "enterprise"]
+TODAY = date(2026, 6, 28)
+
+
 def make_user(i: int) -> tuple[str, str]:
-    """Return (key, value-json) for user number i."""
-    email = f"user{i:07d}@example.com"
+    """Return (key, value-json) for a realistic, randomly-generated user `i`.
+
+    Seeding the RNG with `i` keeps it reproducible AND varied, and the `i` in
+    the email guarantees uniqueness across millions of rows.
+    """
+    rnd = random.Random(i)
+    first = rnd.choice(FIRST_NAMES)
+    last = rnd.choice(LAST_NAMES)
+    domain = rnd.choice(DOMAINS)
+    email = f"{first.lower()}.{last.lower()}{i}@{domain}"
+    country, city = rnd.choice(LOCATIONS)
+    age = rnd.randint(18, 75)
+    phone = f"+{rnd.randint(1, 99)}-{rnd.randint(200, 999)}-{rnd.randint(1000000, 9999999)}"
+    plan = rnd.choice(PLANS)
+    created = (TODAY - timedelta(days=rnd.randint(0, 1095))).isoformat()
     # A fast hash (sha256). Real apps use bcrypt/argon2, but those are
     # deliberately slow and would dominate a throughput test of the *database*.
-    pw_hash = hashlib.sha256(f"password-{i}".encode()).hexdigest()
+    pw_hash = hashlib.sha256(f"{email}:{rnd.random()}".encode()).hexdigest()
     value = json.dumps(
         {
             "id": i,
-            "name": f"User {i}",
+            "name": f"{first} {last}",
             "email": email,
+            "age": age,
+            "country": country,
+            "city": city,
+            "phone": phone,
+            "plan": plan,
+            "verified": rnd.random() < 0.8,
             "password_sha256": pw_hash,
-            "created_at": "2026-06-27T00:00:00Z",
+            "created_at": created,
         },
         separators=(",", ":"),
     )
@@ -175,7 +225,7 @@ def main() -> None:
     print("\nVerifying a sample...")
     ok = 0
     for i in (0, args.count // 2, args.count - 1):
-        email = f"user{i:07d}@example.com"
+        email, _ = make_user(i)
         key = f"db:{db_id}:user:{email}" if namespace else f"user:{email}"
         res = get(base_url, "/api/get?key=" + urllib.parse.quote(key, safe=""))
         if res.get("found"):
