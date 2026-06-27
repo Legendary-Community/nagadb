@@ -91,24 +91,32 @@ export async function deleteEntry(
 
 /** List key/value pairs in a project's database (prefix stripped).
  *
- * `limit` caps how many rows we ask the engine for. A database can hold
- * millions of keys; returning them all would be huge and would freeze the
- * browser, so the UI asks for a page-sized slice. The engine does the prefix
- * filtering, so only this project's keys come back.
+ * `limit`/`offset` page through the data. A database can hold millions of keys;
+ * returning them all would be huge and would freeze the browser, so the UI asks
+ * for one page at a time. The engine does the prefix filtering, so only this
+ * project's keys come back.
  */
 export async function listEntries(
   projectId: string,
-  limit = 200
+  { limit = 50, offset = 0 }: { limit?: number; offset?: number } = {}
 ): Promise<Entry[]> {
   const p = prefix(projectId);
-  const query = new URLSearchParams({ prefix: p, limit: String(limit) }).toString();
+  const query = new URLSearchParams({
+    prefix: p,
+    limit: String(limit),
+    offset: String(offset),
+  }).toString();
   const res = await engineFetch(`/api/list?${query}`);
   if (!res.ok) throw new Error(`engine list failed (HTTP ${res.status})`);
   const all = (await res.json()) as Entry[];
   return all.map((e) => ({ key: e.key.slice(p.length), value: e.value }));
 }
 
-/** How many keys a project's database holds. */
+/** How many keys a project's database holds (the real total, not a page). */
 export async function countEntries(projectId: string): Promise<number> {
-  return (await listEntries(projectId)).length;
+  const query = new URLSearchParams({ prefix: prefix(projectId) }).toString();
+  const res = await engineFetch(`/api/count?${query}`);
+  if (!res.ok) throw new Error(`engine count failed (HTTP ${res.status})`);
+  const data = (await res.json()) as { count: number };
+  return data.count ?? 0;
 }

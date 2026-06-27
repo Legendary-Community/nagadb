@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getProject } from "@/lib/store";
 import {
   listEntries,
+  countEntries,
   putEntry,
   deleteEntry,
   EngineOfflineError,
@@ -25,15 +26,21 @@ function engineError(err: unknown) {
   return NextResponse.json({ error: message }, { status: 502 });
 }
 
-// GET /api/projects/:id/data -> all key/value pairs in this database
-export async function GET(_request: Request, { params }: Params) {
+// GET /api/projects/:id/data?limit=&offset= -> one page of key/value pairs + total
+export async function GET(request: Request, { params }: Params) {
   const { id } = await params;
   if (!(await getProject(id))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  const url = new URL(request.url);
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 500);
+  const offset = Math.max(Number(url.searchParams.get("offset")) || 0, 0);
   try {
-    const entries = await listEntries(id);
-    return NextResponse.json({ entries });
+    const [entries, total] = await Promise.all([
+      listEntries(id, { limit, offset }),
+      countEntries(id),
+    ]);
+    return NextResponse.json({ entries, total, limit, offset });
   } catch (err) {
     return engineError(err);
   }
