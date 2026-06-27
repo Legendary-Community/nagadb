@@ -120,8 +120,11 @@ EOF
 
 # --- 9. Start everything --------------------------------------------------
 systemctl daemon-reload
-systemctl enable --now nagadb-engine.service
-systemctl enable --now nagadb-console.service
+systemctl enable nagadb-engine.service nagadb-console.service
+# `restart` (not just `enable --now`) so re-running this script picks up a new
+# build on an existing install — that's what makes it a one-command updater.
+systemctl restart nagadb-engine.service
+systemctl restart nagadb-console.service
 
 # --- 10. Report -----------------------------------------------------------
 IP="$(curl -fsSL https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
