@@ -21,6 +21,7 @@ import json
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -115,14 +116,29 @@ def main() -> None:
     print(f"Batch    : {args.batch}  |  Workers: {args.workers}")
     print("-" * 60)
 
-    # Make sure the server (and the batch endpoint) is reachable before we start.
+    # Make sure the server is reachable before we start.
     try:
         stats = get(base_url, "/api/stats")
         print(f"Connected. Existing entries: {stats.get('entries', '?')}")
     except Exception as e:  # noqa: BLE001
         sys.exit(f"Cannot reach the engine at {base_url}: {e}\n"
-                 f"Is it running, and does it have the /api/put_batch endpoint? "
-                 f"(re-run the installer on the server to update)")
+                 f"Is it running and is port {base_url.rsplit(':', 1)[-1]} open?")
+
+    # Preflight: confirm the bulk endpoint exists. Older servers don't have it
+    # and would 404 on every batch — fail early with a clear instruction.
+    try:
+        post(base_url, "/api/put_batch", encode_batch(0, 1, db_id, namespace))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            sys.exit(
+                "\n*** Your server's engine is OUT OF DATE. ***\n"
+                "It does not have the /api/put_batch endpoint yet.\n\n"
+                "Fix: SSH into your server (206.206.76.106) and run:\n\n"
+                "  curl -fsSL https://raw.githubusercontent.com/Legendary-Community/"
+                "nagadb/main/deploy/install.sh | sudo bash\n\n"
+                "Then run this script again."
+            )
+        raise
 
     done = 0
     done_lock = threading.Lock()
